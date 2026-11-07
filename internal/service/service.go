@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -86,6 +87,7 @@ type Service struct {
 	privateRegistrySvc       string
 	privateRegistryRealms    []registryauth.Realm
 	privateRegistryRedirects []string
+	privateRegistryRoots     *x509.CertPool
 }
 
 const dockerHubRegistry = "docker.io"

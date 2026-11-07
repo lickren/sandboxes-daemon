@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -47,6 +48,7 @@ type options struct {
 	registryPrivateSvc    string
 	registryPrivateRealms []string
 	registryPrivateRedirs []string
+	registryPrivateCAPath string
 	showVersion           bool
 }
 
@@ -75,6 +77,11 @@ func run() int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	privateCA, caErr := readPrivateRegistryCA(opts.registryPrivateCAPath)
+	if caErr != nil {
+		slog.Error("read private registry CA", "error", caErr)
+		return 1
+	}
 	err = daemon.Run(ctx, daemon.Config{
 		SocketPath:               opts.socketPath,
 		StateDir:                 opts.stateDir,
@@ -92,6 +99,7 @@ func run() int {
 		RegistryPrivateService:   opts.registryPrivateSvc,
 		RegistryPrivateRealms:    opts.registryPrivateRealms,
 		RegistryPrivateRedirects: opts.registryPrivateRedirs,
+		RegistryPrivateCA:        privateCA,
 		GatewayLost:              lost,
 		ProxyHelperPath:          opts.proxyHelperPath,
 	})
@@ -141,6 +149,7 @@ func parseOptions() options {
 	opts.registryPrivateSvc = values.RegistryPrivateService
 	opts.registryPrivateRealms = values.RegistryPrivateRealms
 	opts.registryPrivateRedirs = values.RegistryPrivateRedirects
+	opts.registryPrivateCAPath = values.RegistryPrivateCA
 	return opts
 }
 
@@ -239,4 +248,18 @@ func buildNetwork(opts *options, gatewayLost chan<- string) (runtime.Network, *g
 		return nil, nil, fmt.Errorf("create gateway manager: %w", err)
 	}
 	return daemonnetwork.New(manager, runDir), manager, nil
+}
+
+func readPrivateRegistryCA(path string) ([]byte, error) {
+	if path == "" {
+		return nil, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 1<<20 {
+		return nil, errors.New("private registry CA must be a regular file under 1 MiB")
+	}
+	return os.ReadFile(path) //nolint:gosec // trusted host-only settings path, validated as a regular file under 1 MiB.
 }

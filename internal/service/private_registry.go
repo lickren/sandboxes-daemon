@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -30,7 +31,7 @@ func privateRegistrySettingKey(id string) string { return "sandbox.registry-priv
 
 // SetPrivateRegistry configures the single allowlisted private registry that
 // the guest registry proxy may reach. Empty host disables the feature.
-func (s *Service) SetPrivateRegistry(host, service string, realms, redirects []string) error {
+func (s *Service) SetPrivateRegistry(host, service string, realms, redirects []string, caPEM []byte) error {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 	if host == "" {
 		if service != "" || len(realms) != 0 || len(redirects) != 0 {
@@ -52,10 +53,18 @@ func (s *Service) SetPrivateRegistry(host, service string, realms, redirects []s
 	if err != nil {
 		return err
 	}
+	var roots *x509.CertPool
+	if len(caPEM) != 0 {
+		roots = x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(caPEM) {
+			return fmt.Errorf("%w: private registry CA bundle is invalid", core.ErrConflict)
+		}
+	}
 	s.privateRegistryHost = host
 	s.privateRegistrySvc = service
 	s.privateRegistryRealms = parsed
 	s.privateRegistryRedirects = cleanRedirects
+	s.privateRegistryRoots = roots
 	return nil
 }
 
@@ -162,6 +171,7 @@ type privateRegistryTransportFactory struct {
 	host      string
 	realms    []registryauth.Realm
 	redirects []string
+	roots     *x509.CertPool
 }
 
 func (f privateRegistryTransportFactory) Registry(ctx context.Context, authority string) (http.RoundTripper, error) {
@@ -172,7 +182,7 @@ func (f privateRegistryTransportFactory) Registry(ctx context.Context, authority
 	if err != nil {
 		return nil, err
 	}
-	return registrycredentials.NewForwardRegistryTransport(authority, prefixes, nil)
+	return registrycredentials.NewForwardRegistryTransport(authority, prefixes, f.roots)
 }
 
 func (f privateRegistryTransportFactory) Token(ctx context.Context, realm registryauth.Realm) (http.RoundTripper, error) {
@@ -189,7 +199,7 @@ func (f privateRegistryTransportFactory) Token(ctx context.Context, realm regist
 	if err != nil {
 		return nil, err
 	}
-	return registryauth.NewTokenTransport(realm, prefixes, nil)
+	return registryauth.NewTokenTransport(realm, prefixes, f.roots)
 }
 
 func (f privateRegistryTransportFactory) Redirect(ctx context.Context, authority string) (http.RoundTripper, error) {
@@ -212,7 +222,7 @@ func (f privateRegistryTransportFactory) Redirect(ctx context.Context, authority
 	}
 	var next atomic.Uint64
 	return &http.Transport{
-		Proxy: nil, DisableKeepAlives: true, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: authority},
+		Proxy: nil, DisableKeepAlives: true, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: f.roots, ServerName: authority},
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			if network != "tcp" || address != net.JoinHostPort(authority, "443") {
 				return nil, errors.New("redirect transport rejected unexpected destination")
@@ -289,7 +299,7 @@ func (s *Service) buildPrivateRegistryProxy(ctx context.Context, sb sandbox.Sand
 		Realms: s.privateRegistryRealms, RedirectAuthorities: s.privateRegistryRedirects,
 		TransportFactory: privateRegistryTransportFactory{
 			service: s, sandboxID: sb.ID, host: s.privateRegistryHost,
-			realms: s.privateRegistryRealms, redirects: s.privateRegistryRedirects,
+			realms: s.privateRegistryRealms, redirects: s.privateRegistryRedirects, roots: s.privateRegistryRoots,
 		},
 		Limiter: s.registryPullLimiter, MaxBytes: 16 << 30, TLSAuthority: ca,
 	})

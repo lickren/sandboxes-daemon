@@ -2300,7 +2300,7 @@ func TestResetGlobalPolicyClearsRulesAndProfile(t *testing.T) {
 
 func TestSetPrivateRegistryValidation(t *testing.T) {
 	svc := &Service{}
-	if err := svc.SetPrivateRegistry("registry.example.test", "svc", []string{"auth.example.test/token"}, []string{"cdn.example.test"}); err != nil {
+	if err := svc.SetPrivateRegistry("registry.example.test", "svc", []string{"auth.example.test/token"}, []string{"cdn.example.test"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if svc.privateRegistryHost != "registry.example.test" || svc.privateRegistryRealms[0].Path != "/token" {
@@ -2308,16 +2308,16 @@ func TestSetPrivateRegistryValidation(t *testing.T) {
 	}
 	for name, call := range map[string]func() error{
 		"wildcard host": func() error {
-			return svc.SetPrivateRegistry("*.example.test", "svc", []string{"auth.example.test/token"}, nil)
+			return svc.SetPrivateRegistry("*.example.test", "svc", []string{"auth.example.test/token"}, nil, nil)
 		},
 		"missing service": func() error {
-			return svc.SetPrivateRegistry("registry.example.test", "", []string{"auth.example.test/token"}, nil)
+			return svc.SetPrivateRegistry("registry.example.test", "", []string{"auth.example.test/token"}, nil, nil)
 		},
-		"missing realm": func() error { return svc.SetPrivateRegistry("registry.example.test", "svc", nil, nil) },
+		"missing realm": func() error { return svc.SetPrivateRegistry("registry.example.test", "svc", nil, nil, nil) },
 		"bad realm host": func() error {
-			return svc.SetPrivateRegistry("registry.example.test", "svc", []string{"bad host/token"}, nil)
+			return svc.SetPrivateRegistry("registry.example.test", "svc", []string{"bad host/token"}, nil, nil)
 		},
-		"orphan config": func() error { return svc.SetPrivateRegistry("", "svc", nil, nil) },
+		"orphan config": func() error { return svc.SetPrivateRegistry("", "svc", nil, nil, nil) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := call(); err == nil {

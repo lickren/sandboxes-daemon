@@ -120,7 +120,9 @@ func serveConfigured(ctx context.Context, listen, serviceHost string, routes []s
 	dialTunnel := firstTunnelDialer(rawDial)
 	if dialTunnel != nil {
 		if err := bootstrapProxyTrust(ctx, serviceHost, routes, transport); err != nil {
-			return fmt.Errorf("bootstrap registry proxy trust: %w", err)
+			// Do not kill the sandbox when the CA bootstrap fails: dockerd can
+			// still start, and the failure is logged without credentials.
+			log.Printf("bootstrap registry proxy trust: %v", err)
 		}
 	}
 	if len(routes) == 0 {
@@ -156,7 +158,10 @@ func serveConfigured(ctx context.Context, listen, serviceHost string, routes []s
 	return serveAll(ctx, servers)
 }
 
-const proxyCAFile = "/tmp/rheic-proxy-ca-bundle.pem"
+const (
+	proxyCAFile = "/tmp/rheic-proxy-ca-bundle.pem"
+	caPath      = "/__rheic/proxy/ca/"
+)
 
 func bootstrapProxyTrust(ctx context.Context, serviceHost string, routes []string, transport http.RoundTripper) error {
 	hosts := []string{serviceHost}
@@ -170,29 +175,46 @@ func bootstrapProxyTrust(ctx context.Context, serviceHost string, routes []strin
 			hosts = append(hosts, route.host)
 		}
 	}
-	for _, host := range hosts {
-		if !strings.EqualFold(host, "registry-1.docker.io") {
-			continue
-		}
-		cert, err := fetchProxyCA(ctx, transport)
+	services := []string{""}
+	if len(routes) > 0 {
+		parsed, err := parseProxyRoutes(routes)
 		if err != nil {
 			return err
 		}
-		if len(cert) == 0 {
-			return errors.New("registry proxy did not provide a trusted CA")
+		services = services[:0]
+		for _, route := range parsed {
+			services = append(services, route.service)
 		}
-		return installProxyCA(cert)
+	}
+	for _, service := range services {
+		cert, err := fetchProxyCAForService(ctx, transport, service)
+		if err != nil {
+			return fmt.Errorf("fetch proxy CA for service %q: %w", service, err)
+		}
+		if len(cert) == 0 {
+			// The broker returns 404 for routes without a registry CA (for
+			// example plain HTTP service proxies); keep looking.
+			continue
+		}
+		if err := installProxyCA(cert); err != nil {
+			return fmt.Errorf("install proxy CA for service %q: %w", service, err)
+		}
+		return nil
 	}
 	return nil
 }
 
-func fetchProxyCA(ctx context.Context, transport http.RoundTripper) ([]byte, error) {
-	token, err := fetchTokenForService(ctx, transport, "")
+func fetchProxyCAForService(ctx context.Context, transport http.RoundTripper, service string) ([]byte, error) {
+	token, err := fetchTokenForService(ctx, transport, service)
 	if err != nil {
 		return nil, err
 	}
 	defer clear([]byte(token))
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker/__rheic/proxy/ca", http.NoBody)
+	path := caPath
+	if service != "" {
+		path += service
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker"+path, http.NoBody)
 	if err != nil {
 		return nil, err
 	}

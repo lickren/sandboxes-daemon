@@ -45,6 +45,7 @@ type Config struct {
 	RegistryPrivateService   string
 	RegistryPrivateRealms    []string
 	RegistryPrivateRedirects []string
+	RegistryPrivateCA        []byte
 	// GatewayLost reports sandboxes whose gateway exited unexpectedly.
 	GatewayLost     <-chan string
 	ProxyHelperPath string
@@ -60,7 +61,7 @@ func configureService(ctx context.Context, cfg *Config, svc *service.Service) (f
 		return nil, err
 	}
 	if cfg.RegistryPrivateHost != "" {
-		if err := svc.SetPrivateRegistry(cfg.RegistryPrivateHost, cfg.RegistryPrivateService, cfg.RegistryPrivateRealms, cfg.RegistryPrivateRedirects); err != nil {
+		if err := svc.SetPrivateRegistry(cfg.RegistryPrivateHost, cfg.RegistryPrivateService, cfg.RegistryPrivateRealms, cfg.RegistryPrivateRedirects, cfg.RegistryPrivateCA); err != nil {
 			return nil, err
 		}
 	}

@@ -27,6 +27,8 @@ type Values struct {
 	RegistryPrivateService   string
 	RegistryPrivateRealms    []string
 	RegistryPrivateRedirects []string
+	// RegistryPrivateCA is an optional host-side PEM bundle for a private CA.
+	RegistryPrivateCA string
 }
 
 // DefaultPath returns ~/.config/rheic/settings.toml, honoring XDG_CONFIG_HOME.
@@ -178,7 +180,7 @@ func parse(r io.Reader, values *Values) error {
 			}
 		case "docker_volume_size":
 			values.DockerVolumeSize = value
-		case "registry_private_host", "registry_private_service", "registry_private_realms", "registry_private_redirects":
+		case "registry_private_host", "registry_private_service", "registry_private_realms", "registry_private_redirects", "registry_private_ca":
 			if err := parseRegistryPrivateSetting(values, key, value); err != nil {
 				return fmt.Errorf("settings line %d: %w", lineNumber, err)
 			}
@@ -210,6 +212,8 @@ func parseRegistryPrivateSetting(values *Values, key, value string) error {
 			return err
 		}
 		values.RegistryPrivateRedirects = redirects
+	case "registry_private_ca":
+		values.RegistryPrivateCA = strings.TrimSpace(value)
 	}
 	return nil
 }
